@@ -1,76 +1,62 @@
 import requests
 import time
-import telebot
-from config import TELEGRAM_BOT_TOKEN, USER_CHAT_ID
+import telegram
+from flask import Flask
 
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+app = Flask(__name__)
 
-def fetch_nfts():
-    urls = {
-        "tonnel": "https://tonnel.io/api/gift-nfts",
-        "mrkt": "https://api.mrkt.io/v1/gift-nfts",
-        "portal": "https://api.getgems.io/v2/gift-nfts"
-    }
-    all_data = []
+@app.route('/')
+def home():
+    return "NFT Sniper Bot is running!"
 
-    for name, url in urls.items():
-        try:
-            res = requests.get(url)
-            if res.status_code == 200:
-                nfts = res.json()
-                for nft in nfts:
-                    nft["market"] = name
-                    all_data.append(nft)
-        except Exception as e:
-            print(f"خطأ في {name}: {e}")
-    return all_data
+# إعدادات البوت
+TELEGRAM_TOKEN = "ضع التوكن هنا"
+TELEGRAM_CHAT_ID = "5804001091"  # أو استخدم @hamza345567
 
-def filter_good_deals(nfts):
-    good_nfts = []
-    for nft in nfts:
-        try:
-            price = float(nft.get("price", 0))
-            floor = float(nft.get("floor_price", 0))
-            if price > 0 and floor > 0:
-                discount = ((floor - price) / floor) * 100
-                if discount >= 15:
-                    nft["discount"] = round(discount, 2)
-                    good_nfts.append(nft)
-        except:
-            continue
-    return good_nfts
+bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
-def send_alert(message):
+collections = [
+    "vintage-cigar", "lol-pop", "tonpunks", "ton-cats", "tonopoly", "tonano", "tonimals", "ton-football", "ton-matrix"
+]
+
+def check_market():
     try:
-        bot.send_message(USER_CHAT_ID, message, parse_mode="HTML", disable_web_page_preview=True)
+        for collection in collections:
+            url = f"https://api.mrkt.io/v1/collections/{collection}/items?sort=price_asc&limit=1"
+            res = requests.get(url)
+            data = res.json()
+
+            if not data or 'items' not in data:
+                continue
+
+            cheapest = data['items'][0]
+            price = float(cheapest['priceTon'])
+            floor = float(data['floorPriceTon'])
+
+            discount = ((floor - price) / floor) * 100
+
+            if price <= 15 and discount >= 15:
+                link = f"https://mrkt.io/asset/{cheapest['address']}"
+                message = f"📉 صفقة قوية في: {collection}\n" \
+                          f"💰 السعر: {price} TON\n" \
+                          f"🏷️ الفلور: {floor} TON\n" \
+                          f"🔻 أقل بـ{round(discount, 1)}%\n" \
+                          f"🔗 {link}"
+
+                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+
     except Exception as e:
-        print(f"فشل إرسال الرسالة: {e}")
+        print("Error:", e)
 
-def check_gift_nfts():
-    nfts = fetch_nfts()
-    good_nfts = filter_good_deals(nfts)
-
-    for nft in good_nfts:
-        name = nft.get("name", "بدون اسم")
-        price = nft.get("price")
-        floor = nft.get("floor_price")
-        link = nft.get("url", "#")
-        market = nft.get("market")
-        discount = nft.get("discount")
-
-        message = f"""
-🎁 <b>صفقة NFT محتملة ({market})</b>
-📛 <b>{name}</b>
-💰 <b>السعر:</b> {price} TON
-📉 <b>الفلور:</b> {floor} TON
-🔻 <b>خصم:</b> {discount}%
-🔗 <a href="{link}">رابط الشراء</a>
-"""
-        send_alert(message)
-
-# ✅ ضروري هذا السطر
-if __name__ == "__main__":
-    send_alert("✅ البوت بدا يخدم!")
+# تشغيل البوت في الخلفية
+def run_bot():
     while True:
-        check_gift_nfts()
+        check_market()
         time.sleep(120)
+
+import threading
+threading.Thread(target=run_bot).start()
+
+# تشغيل Flask لنجعل Render يبقي البوت شغال
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=10000)
