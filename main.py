@@ -11,8 +11,8 @@ logging.basicConfig(
 )
 
 # بيانات البوت
-TOKEN = "7672569553:AAFBm90gH84t4j3j99JcNDoDFcpoGL9fokI"
-CHAT_ID = "5804001091"  # ID تاعك
+TOKEN = "7438194972:AAFpPmLMbvJz6841CmDXDhqvSqlGMkNUvZw"
+CHAT_ID = "7438194972"  # ID تاعك
 
 bot = Bot(token=TOKEN)
 
