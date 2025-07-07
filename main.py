@@ -1,62 +1,99 @@
-import requests
-import time
-import telegram
-from flask import Flask
+import logging
+import asyncio
+import aiohttp
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-app = Flask(__name__)
+# إعدادات اللوج
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-@app.route('/')
-def home():
-    return "NFT Sniper Bot is running!"
+# بيانات البوت
+TOKEN = "7672569553:AAFBm90gH84t4j3j99JcNDoDFcpoGL9fokI"
+CHAT_ID = "5804001091"  # ID تاعك
 
-# إعدادات البوت
-TELEGRAM_TOKEN = "ضع التوكن هنا"
-TELEGRAM_CHAT_ID = "5804001091"  # أو استخدم @hamza345567
+bot = Bot(token=TOKEN)
 
-bot = telegram.Bot(token=TELEGRAM_TOKEN)
+# فلور مبدئي لكل سلسلة
+floor_prices = {}
 
-collections = [
-    "vintage-cigar", "lol-pop", "tonpunks", "ton-cats", "tonopoly", "tonano", "tonimals", "ton-football", "ton-matrix"
-]
+# أمر /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ البوت يخدم! رايح يراقب سوق Tonnel وMrkt.io ويعلمك بأي فرصة 🔥")
 
-def check_market():
-    try:
-        for collection in collections:
-            url = f"https://api.mrkt.io/v1/collections/{collection}/items?sort=price_asc&limit=1"
-            res = requests.get(url)
-            data = res.json()
+# جلب بيانات السوق
+async def fetch_market_data():
+    urls = [
+        "https://api.getgems.io/nft/items?limit=100&order_by=price&owner=marketplace&sale_type=fixed_price",
+        "https://mrkt.io/api/v1/nfts?limit=100&sort=price_asc"
+    ]
+    nfts = []
+    async with aiohttp.ClientSession() as session:
+        for url in urls:
+            try:
+                async with session.get(url) as resp:
+                    data = await resp.json()
+                    if "nft_items" in data:
+                        items = data["nft_items"]
+                    elif "nfts" in data:
+                        items = data["nfts"]
+                    else:
+                        items = []
+                    nfts.extend(items)
+            except Exception as e:
+                logging.error(f"خطأ في جلب السوق: {e}")
+    return nfts
 
-            if not data or 'items' not in data:
-                continue
+# مقارنة السعر وإرسال تنبيه
+async def check_deals():
+    nfts = await fetch_market_data()
+    for nft in nfts:
+        try:
+            # التحقق من المصدر
+            if "metadata" in nft:
+                name = nft["metadata"].get("name", "No name")
+                collection = nft.get("collection", {}).get("name", "Unknown")
+                image = nft["metadata"].get("preview", nft["metadata"].get("image", ""))
+                price = float(nft["price"]) / 10**9
+                link = f"https://getgems.io/nft/{nft['address']}" if "address" in nft else "https://mrkt.io"
 
-            cheapest = data['items'][0]
-            price = float(cheapest['priceTon'])
-            floor = float(data['floorPriceTon'])
+            else:
+                name = nft.get("name", "Unknown")
+                collection = nft.get("collection_slug", "Unknown")
+                image = nft.get("image_url", "")
+                price = float(nft["price"]) / 10**9
+                link = f"https://mrkt.io/nft/{nft['slug']}" if "slug" in nft else "https://mrkt.io"
 
-            discount = ((floor - price) / floor) * 100
+            # فلور برايس لكل كوليكشن
+            key = collection.lower()
+            if key not in floor_prices or price < floor_prices[key]:
+                floor_prices[key] = price
 
-            if price <= 15 and discount >= 15:
-                link = f"https://mrkt.io/asset/{cheapest['address']}"
-                message = f"📉 صفقة قوية في: {collection}\n" \
-                          f"💰 السعر: {price} TON\n" \
-                          f"🏷️ الفلور: {floor} TON\n" \
-                          f"🔻 أقل بـ{round(discount, 1)}%\n" \
-                          f"🔗 {link}"
+            # مقارنة السعر الحالي بالفلور
+            floor = floor_prices[key]
+            if price <= floor * 0.85:
+                text = f"🔥 فرصة!\n\n📛 {name}\n💎 الكوليكشن: {collection}\n💰 السعر: {price:.2f} TON\n\n📎 [رابط العرض]({link})"
+                await bot.send_photo(chat_id=CHAT_ID, photo=image, caption=text, parse_mode="Markdown")
+        except Exception as e:
+            logging.warning(f"خطأ في NFT: {e}")
 
-                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-
-    except Exception as e:
-        print("Error:", e)
-
-# تشغيل البوت في الخلفية
-def run_bot():
+# جدولة المراقبة كل دقيقة
+async def run_monitor():
     while True:
-        check_market()
-        time.sleep(120)
+        await check_deals()
+        await asyncio.sleep(60)
 
-import threading
-threading.Thread(target=run_bot).start()
-
-# تشغيل Flask لنجعل Render يبقي البوت شغال
+# التشغيل
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=10000)
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_monitor())
+
+    app.run_polling()
+
+
+        
