@@ -1,4 +1,4 @@
 requests
 python-telegram-bot==20.3
-flask
+aiohttp==3.9.3
 
